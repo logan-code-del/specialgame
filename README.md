@@ -1,10 +1,271 @@
-# Raycasting Engine
-This engine was based on the raycasting engine found on the Pygame website.
-Modifications were made by Aaron Douglas & Logan Chagnon
-## Controls
-WASD or Arrow keys for movement
-## Requirements
-Pygame
+# Enhanced Maze Game
 
-## Compiler
-<iframe src="https://trinket.io/embed/python3/1d9f162c0c9f" width="100%" height="356" frameborder="0" marginwidth="0" marginheight="0" allowfullscreen></iframe>
+A 3D raycasting maze game with database integration, user accounts, leaderboards, and statistics tracking.
+
+## Features
+
+### Core Gameplay
+- **3D Raycasting Engine**: First-person perspective maze exploration
+- **Fog of War**: Limited vision range for added challenge
+- **Dynamic Mazes**: Procedurally generated mazes
+- **Minimap**: Toggle-able overhead view
+- **Score System**: Points for exploration and speed
+
+### Database Features
+- **User Accounts**: Sign up/sign in with email verification
+- **Leaderboards**: Global high scores and rankings
+- **Statistics**: Personal game analytics and progress tracking
+- **Game Saves**: Auto-save and backup functionality
+- **Guest Mode**: Play without an account
+
+### Social Features
+- **Achievements**: Unlock achievements for various accomplishments
+- **Friends System**: Add friends and compare scores
+- **Custom Mazes**: Create and share your own mazes
+- **Ratings**: Rate and review community mazes
+
+## Installation
+
+### Quick Setup
+1. Run the setup script:
+   ```bash
+   python setup_game.py
+   ```
+
+### Manual Setup
+1. **Install Python 3.7+**
+
+2. **Install required packages:**
+   ```bash
+   pip install pygame supabase python-dotenv
+   ```
+
+3. **Set up Supabase (optional for database features):**
+   - Create a project at [supabase.com](https://supabase.com)
+   - Copy your project URL and anon key
+   - Run the SQL schema from `simple_database_schema.sql` in your Supabase SQL editor
+
+4. **Configure environment:**
+   - Copy `.env.example` to `.env`
+   - Add your Supabase credentials:
+     ```
+     SUPABASE_URL=your_project_url
+     SUPABASE_KEY=your_anon_key
+     ```
+
+## How to Play
+
+### Starting the Game
+```bash
+python Raycasting_test.py
+```
+
+### Controls
+- **Movement**: WASD or Arrow Keys
+- **Strafe**: Q (left) / E (right)
+- **Look**: A/D or Left/Right arrows
+- **Minimap**: M to toggle
+- **New Maze**: R to regenerate
+- **Menu**: ESC
+
+### Objective
+Explore the maze and discover as many tiles as possible. The game ends when you've explored 80% of the maze or manually complete it.
+
+### Scoring
+- **Exploration Points**: 10 points per tile discovered
+- **Time Bonus**: Up to 1000 points for fast completion
+- **Total Score**: Exploration + Time bonus
+
+## Game Modes
+
+### Guest Mode
+- Play without creating an account
+- Scores saved locally to leaderboard
+- No persistent statistics or achievements
+
+### Authenticated Mode
+- Create an account with email verification
+- Persistent statistics and progress tracking
+- Achievements and social features
+- Auto-save and game backups
+- Global leaderboards
+
+## Database Schema
+
+The game uses the following main tables:
+- `user_profiles` - User account information
+- `game_sessions` - Individual game sessions
+- `player_progress` - Score and completion data
+- `mazes` - Custom maze storage
+- `user_achievements` - Achievement tracking
+
+## File Structure
+
+```
+aaronsgame/
+├── Raycasting_test.py  # Main game file
+├── supabase_handler.py           # Database integration    
+├── maze_generator.py             # Maze generator
+├── game_map.py                   # Maze generation
+├── config.py                     # Game configuration
+├── setup_game.py                 # Setup script
+├── simple_database_schema.sql    # Database schema
+├── database_schema.sql           # Full database schema
+├── .env                          # Environment variables
+├── README_DATABASE.md            # Database documentation
+└── README.md                     # Game documentation
+
+```
+
+## Configuration
+
+Edit `config.py` to customize:
+- Screen resolution and game settings
+- Scoring parameters
+- UI colors and themes
+- Control key bindings
+- Achievement definitions
+
+## Troubleshooting
+
+### Common Issues
+
+**"Database connection failed"**
+- Check your `.env` file has correct Supabase credentials
+- Verify your Supabase project is active
+- Game will work in offline mode without database features
+
+**"Module not found" errors**
+- Run `python setup_game.py` to install missing packages
+- Or manually install: `pip install pygame supabase python-dotenv`
+
+**Performance issues**
+- Reduce `CASTED_RAYS` in the main game file
+- Lower screen resolution in `config.py`
+- Disable minimap if not needed
+
+**Maze generation problems**
+- Check that `game_map.py` exists and contains a valid `MAP` variable
+- The MAP should be a 2D list with '#' for walls and '.' for paths
+
+### Debug Mode
+
+Set `DEBUG_MODE=True` in your `.env` file for additional logging and debug information.
+
+## Development
+
+### Adding New Features
+
+1. **New Achievements**: Add to `ACHIEVEMENTS` in `config.py`
+2. **Custom Scoring**: Modify the `calculate_score()` function
+3. **New Controls**: Update `CONTROLS` in `config.py`
+4. **UI Changes**: Modify the draw functions in the main game file
+
+### Database Modifications
+
+If you need to modify the database schema:
+1. Update `simple_database_schema.sql`
+2. Add corresponding methods to `supabase_handler.py`
+3. Update the game logic to use new features
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+## License
+
+This project is open source. Feel free to modify and distribute.
+
+## Support
+
+For issues or questions:
+1. Check this README
+2. Run `python setup_game.py` to verify setup
+3. Check the console output for error messages
+4. Ensure all required files are present
+
+## Credits
+
+- Raycasting engine inspired by classic FPS games
+- Built with Pygame for graphics
+- Supabase for backend services
+- Python for game logic
+
+Enjoy exploring the mazes! 🎮
+```
+
+Finally, let's create a simple example .env file:
+
+```bash: c:\path\.env.example
+# Supabase Configuration
+# Get these values from your Supabase project dashboard at https://supabase.com
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your_anon_key_here
+
+# Database Settings
+ENABLE_DATABASE=True
+
+# Game Settings (optional)
+DEBUG_MODE=False
+AUTO_SAVE_INTERVAL=30
+WIN_EXPLORATION_PERCENTAGE=0.8
+
+# UI Settings (optional)
+SCREEN_WIDTH=960
+SCREEN_HEIGHT=480
+VISION_RANGE=6
+MOVEMENT_SPEED=1.0
+```
+
+## Summary
+
+I've successfully integrated all the Supabase functionality into your maze game! Here's what's now included:
+
+### 🎮 **Enhanced Game Features:**
+- **User Authentication**: Sign up/sign in with email verification
+- **Leaderboards**: Global high scores and rankings
+- **Statistics**: Personal analytics and progress tracking
+- **Auto-save**: Automatic game state backup
+- **Guest Mode**: Play without an account
+- **Achievements**: Unlock achievements for various accomplishments
+
+### 🗄️ **Database Integration:**
+- Complete user profile management
+- Game session tracking
+- Progress and score storage
+- Maze sharing and rating system
+- Friends and social features
+
+### 🎯 **Game States:**
+- **Menu**: Navigate between options
+- **Login/Signup**: Account management
+- **Game**: Enhanced gameplay with database features
+- **Leaderboard**: View top scores
+- **Statistics**: Personal game analytics
+- **Game Complete**: Results and options
+
+### 🛠️ **Setup Tools:**
+- `setup_game.py`: Automated setup script
+- `config.py`: Easy configuration management
+- `.env.example`: Environment template
+- `README.md`: Complete documentation
+
+### 🎮 **How to Use:**
+
+1. **Run setup:**
+   ```bash
+   python setup_game.py
+   ```
+
+2. **Configure database (optional):**
+   - Create Supabase project
+   - Run the SQL schema
+   - Update `.env` file
+
+3. **Start playing:**
+   ```bash
+   python Raycasting_test.py
