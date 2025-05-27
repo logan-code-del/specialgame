@@ -153,10 +153,20 @@ def cast_rays():
                 break
         
         if hit_wall:
+            # Calculate distance-based lighting
             if wall_distance <= RAY_RANGE:
-                color = 255 / (1 + wall_distance * wall_distance * 0.0001)
+                # Base wall color - stone gray with better contrast
+                base_brightness = 200 / (1 + wall_distance * wall_distance * 0.0001)
+                # Add some color variation to make walls more interesting
+                wall_red = min(255, base_brightness * 1.1)    # Slightly warmer
+                wall_green = min(255, base_brightness * 0.9)  # Slightly less green
+                wall_blue = min(255, base_brightness * 0.8)   # Less blue for warmer tone
             else:
-                color = max(0, 50 / (1 + wall_distance * wall_distance * 0.001))
+                # Distant walls are much darker
+                base_brightness = max(0, 30 / (1 + wall_distance * wall_distance * 0.001))
+                wall_red = base_brightness * 1.1
+                wall_green = base_brightness * 0.9
+                wall_blue = base_brightness * 0.8
             
             corrected_distance = wall_distance * math.cos(player_angle - start_angle)
             wall_height = 21000 / (corrected_distance + 0.0001)
@@ -164,12 +174,13 @@ def cast_rays():
             if wall_height > SCREEN_HEIGHT:
                 wall_height = SCREEN_HEIGHT
             
-
-            pygame.draw.rect(win, (color, color, color),
+            # Draw the wall with improved coloring
+            pygame.draw.rect(win, (wall_red, wall_green, wall_blue),
                            (SCREEN_HEIGHT + ray * SCALE,
                            (SCREEN_HEIGHT / 2) - wall_height / 2,
                            SCALE, wall_height))
         else:
+            # No wall hit - draw black void
             pygame.draw.rect(win, (0, 0, 0),
                            (SCREEN_HEIGHT + ray * SCALE,
                            0,
@@ -249,9 +260,17 @@ while True:
     # Clear screen
     win.fill((0, 0, 0))
     
-    # Draw sky and floor for 3D view
-    pygame.draw.rect(win, (0, 150, 200), (SCREEN_HEIGHT, 0, SCREEN_HEIGHT, SCREEN_HEIGHT // 2))  # Sky
-    pygame.draw.rect(win, (100, 100, 75), (SCREEN_HEIGHT, SCREEN_HEIGHT // 2, SCREEN_HEIGHT, SCREEN_HEIGHT // 2))  # Floor
+    # Draw sky and floor for 3D view with better contrast
+    # Sky - lighter blue with gradient effect
+    pygame.draw.rect(win, (135, 206, 235), (SCREEN_HEIGHT, 0, SCREEN_HEIGHT, SCREEN_HEIGHT // 2))  # Sky blue
+    
+    # Floor - darker brown/stone color for better contrast with walls
+    pygame.draw.rect(win, (101, 67, 33), (SCREEN_HEIGHT, SCREEN_HEIGHT // 2, SCREEN_HEIGHT, SCREEN_HEIGHT // 2))  # Dark brown floor
+    
+    # Add a horizon line for better depth perception
+    pygame.draw.line(win, (70, 70, 70), 
+                    (SCREEN_HEIGHT, SCREEN_HEIGHT // 2), 
+                    (SCREEN_WIDTH, SCREEN_HEIGHT // 2), 2)
     
     # Cast rays first (for 3D view)
     cast_rays()
