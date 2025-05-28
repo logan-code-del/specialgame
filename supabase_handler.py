@@ -738,6 +738,117 @@ class GameSupabaseHandler:
         
         return None
     
+    def get_pending_friend_requests(self) -> List[Dict]:
+        """Get pending friend requests sent TO the current user"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            # Get requests where current user is the friend_id (receiving requests)
+            requests_response = self.supabase.table("friendships").select(
+                "id, user_id, status, created_at"
+            ).eq("friend_id", self.current_user.id).eq("status", "pending").execute()
+            
+            if not requests_response.data:
+                return []
+            
+            # Get sender profiles
+            sender_ids = [r["user_id"] for r in requests_response.data]
+            
+            if sender_ids:
+                profiles_response = self.supabase.table("user_profiles").select(
+                    "user_id, username, total_score, games_played"
+                ).in_("user_id", sender_ids).execute()
+                
+                profiles_by_id = {p["user_id"]: p for p in profiles_response.data}
+                
+                requests = []
+                for request in requests_response.data:
+                    sender_profile = profiles_by_id.get(request["user_id"])
+                    if sender_profile:
+                        requests.append({
+                            "id": request["id"],
+                            "sender_id": request["user_id"],
+                            "status": request["status"],
+                            "created_at": request["created_at"],
+                            "sender_profile": sender_profile
+                        })
+                
+                return requests
+            
+            return []
+            
+        except Exception as e:
+            print(f"Error getting pending requests: {e}")
+            return []
+
+    def respond_to_friend_request(self, request_id: int, accept: bool) -> bool:
+        """Accept or decline a friend request"""
+        if not self.is_authenticated():
+            return False
+        
+        try:
+            new_status = "accepted" if accept else "declined"
+            
+            response = self.supabase.table("friendships").update({
+                "status": new_status,
+                "updated_at": datetime.now().isoformat()
+            }).eq("id", request_id).eq("friend_id", self.current_user.id).execute()
+            
+            if response.data:
+                action = "accepted" if accept else "declined"
+                print(f"✅ Friend request {action}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"Error responding to friend request: {e}")
+            return False
+
+    def get_sent_friend_requests(self) -> List[Dict]:
+        """Get friend requests sent BY the current user"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            requests_response = self.supabase.table("friendships").select(
+                "id, friend_id, status, created_at"
+            ).eq("user_id", self.current_user.id).eq("status", "pending").execute()
+            
+            if not requests_response.data:
+                return []
+            
+            # Get recipient profiles
+            recipient_ids = [r["friend_id"] for r in requests_response.data]
+            
+            if recipient_ids:
+                profiles_response = self.supabase.table("user_profiles").select(
+                    "user_id, username"
+                ).in_("user_id", recipient_ids).execute()
+                
+                profiles_by_id = {p["user_id"]: p for p in profiles_response.data}
+                
+                requests = []
+                for request in requests_response.data:
+                    recipient_profile = profiles_by_id.get(request["friend_id"])
+                    if recipient_profile:
+                        requests.append({
+                            "id": request["id"],
+                            "recipient_id": request["friend_id"],
+                            "status": request["status"],
+                            "created_at": request["created_at"],
+                            "recipient_profile": recipient_profile
+                        })
+                
+                return requests
+            
+            return []
+            
+        except Exception as e:
+            print(f"Error getting sent requests: {e}")
+            return []
+
     def get_friends(self, status: str = "accepted") -> List[Dict]:
         """
         Get user's friends
