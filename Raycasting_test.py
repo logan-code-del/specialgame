@@ -51,6 +51,9 @@ player_name = ""
 input_text = ""
 input_mode = None  # None, "name", "email", "password", "username"
 login_mode = "signin"  # signin, signup
+friend_search_text = ""
+friend_message = ""
+show_friends_menu = False
 error_message = ""
 success_message = ""
 menu_selection = 0
@@ -345,7 +348,8 @@ def draw_menu():
         "2. View Leaderboard", 
         "3. Login/Signup",
         "4. View Statistics",
-        "5. Quit"
+        "5. Friends & Social",  # NEW OPTION
+        "6. Quit"
     ]
     
     if db_handler and db_handler.is_authenticated():
@@ -356,8 +360,7 @@ def draw_menu():
     
     for i, option in enumerate(menu_options):
         color = YELLOW if i == menu_selection else WHITE
-        draw_text(option, SCREEN_WIDTH // 2, 150 + i * 40, color, 20, center=True)
-    
+        draw_text(option, SCREEN_WIDTH // 2, 150 + i * 40, color, 20, center=True)   
     # Instructions
     draw_text("Use UP/DOWN arrows to navigate, ENTER to select", SCREEN_WIDTH // 2, 400, GRAY, 16, center=True)
     
@@ -375,6 +378,51 @@ def draw_menu():
         draw_text(error_message, SCREEN_WIDTH // 2, 350, RED, 16, center=True)
     if success_message:
         draw_text(success_message, SCREEN_WIDTH // 2, 350, GREEN, 16, center=True)
+
+def draw_friends_menu():
+    """Draw the friends and social menu"""
+    win.fill(BLACK)
+    
+    draw_text("FRIENDS & SOCIAL", SCREEN_WIDTH // 2, 30, GOLD, 32, center=True)
+    
+    if not db_handler or not db_handler.is_authenticated():
+        draw_text("Please log in to use social features", SCREEN_WIDTH // 2, 200, RED, 20, center=True)
+        draw_text("Press ESC to go back", SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50, GRAY, 16, center=True)
+        return
+    
+    # Add friend section with clear visual feedback
+    draw_text("Add Friend:", 50, 100, WHITE, 20)
+    
+    # Draw input box background
+    input_box_color = YELLOW if input_mode == "friend_search" else WHITE
+    pygame.draw.rect(win, (50, 50, 50), (200, 95, 400, 30))  # Background box
+    pygame.draw.rect(win, input_box_color, (200, 95, 400, 30), 2)  # Border
+    
+    # Display text with cursor
+    search_display = friend_search_text + ("_" if input_mode == "friend_search" else "")
+    draw_text(search_display, 205, 100, input_box_color, 18)
+    draw_text("(Click here to type username, ENTER to send request)", 50, 130, GRAY, 14)   
+    # Friends list
+    friends = db_handler.get_friends("accepted") if db_handler else []
+    draw_text(f"Your Friends ({len(friends)}):", 50, 170, WHITE, 20)
+    
+    y_pos = 200
+    if friends:
+        for i, friend in enumerate(friends[:8]):  # Show max 8 friends
+            friend_name = friend.get('friend_profile', {}).get('username', 'Unknown')
+            friend_score = friend.get('friend_profile', {}).get('total_score', 0)
+            draw_text(f"• {friend_name} (Score: {friend_score})", 70, y_pos, WHITE, 16)
+            y_pos += 25
+    else:
+        draw_text("No friends yet. Add some friends to compete!", 70, y_pos, GRAY, 16)
+    
+    # Show messages
+    if friend_message:
+        color = GREEN if "sent" in friend_message.lower() else RED
+        draw_text(friend_message, SCREEN_WIDTH // 2, 400, color, 16, center=True)
+    
+    # Instructions
+    draw_text("Press ESC to go back", SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50, GRAY, 16, center=True)
 
 def draw_login():
     """Draw the login/signup screen"""
@@ -625,9 +673,9 @@ def handle_menu_input(event):
     
     if event.type == pygame.KEYDOWN:
         if event.key == pygame.K_UP:
-            menu_selection = (menu_selection - 1) % 5
+            menu_selection = (menu_selection - 1) % 6  # Changed from 5 to 6
         elif event.key == pygame.K_DOWN:
-            menu_selection = (menu_selection + 1) % 5
+            menu_selection = (menu_selection + 1) % 6  # Changed from 5 to 6
         elif event.key == pygame.K_RETURN:
             error_message = ""
             success_message = ""
@@ -646,9 +694,54 @@ def handle_menu_input(event):
                     game_state = "login"
             elif menu_selection == 3:  # View Statistics
                 game_state = "stats"
-            elif menu_selection == 4:  # Quit
+            elif menu_selection == 4:  # Friends & Social
+                game_state = "friends"
+            elif menu_selection == 5:  # Quit
                 pygame.quit()
                 sys.exit(0)
+
+def handle_friends_input(event):
+    """Handle input for friends screen"""
+    global input_mode, friend_search_text, friend_message, game_state
+    
+    if event.type == pygame.KEYDOWN:
+        if event.key == pygame.K_ESCAPE:
+            game_state = "menu"
+            input_mode = None
+            friend_message = ""
+        
+        elif event.key == pygame.K_RETURN and input_mode == "friend_search":
+            # Send friend request
+            if friend_search_text.strip() and db_handler and db_handler.is_authenticated():
+                result = db_handler.add_friend(friend_search_text.strip())
+                if result:
+                    friend_message = f"Friend request sent to {friend_search_text}!"
+                    friend_search_text = ""
+                else:
+                    friend_message = "Failed to send friend request. User may not exist."
+            else:
+                friend_message = "Please log in to add friends"
+            input_mode = None
+        
+        elif input_mode == "friend_search" and event.unicode.isprintable():
+            # Add character to search
+            if len(friend_search_text) < 20:
+                friend_search_text += event.unicode
+        
+        elif event.key == pygame.K_BACKSPACE and input_mode == "friend_search":
+            # Remove character
+            friend_search_text = friend_search_text[:-1]
+    
+    elif event.type == pygame.MOUSEBUTTONDOWN:
+        # Click to select friend search field
+        mouse_x, mouse_y = event.pos
+        
+        # Adjust these coordinates to match your text field position
+        if 100 <= mouse_y <= 125 and 200 <= mouse_x <= 600:  # Friend search field area
+            input_mode = "friend_search"
+            print("Friend search field activated")  # Debug message
+        else:
+            input_mode = None
 
 speed = 1.0
 
@@ -673,6 +766,9 @@ while True:
         elif game_state == "leaderboard" or game_state == "stats":
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 game_state = "menu"
+        
+        elif game_state == "friends":  # ADD THIS SECTION
+            handle_friends_input(event)
         
         elif game_state == "game_complete":
             if event.type == pygame.KEYDOWN:
@@ -715,9 +811,11 @@ while True:
     elif game_state == "stats":
         draw_stats()
     
+    elif game_state == "friends":  # ADD THIS SECTION
+        draw_friends_menu()
+    
     elif game_state == "game_complete":
         draw_game_complete()
-    
     elif game_state == "game":
         # Update explored tiles based on current position
         update_explored_tiles()
