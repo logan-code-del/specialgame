@@ -53,6 +53,8 @@ input_mode = None  # None, "name", "email", "password", "username"
 login_mode = "signin"  # signin, signup
 friend_search_text = ""
 friend_message = ""
+selected_request = 0
+friend_menu_tab = "friends"  # "friends", "requests", "sent"
 show_friends_menu = False
 error_message = ""
 success_message = ""
@@ -390,39 +392,103 @@ def draw_friends_menu():
         draw_text("Press ESC to go back", SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50, GRAY, 16, center=True)
         return
     
-    # Add friend section with clear visual feedback
-    draw_text("Add Friend:", 50, 100, WHITE, 20)
+    # Tab navigation
+    tabs = ["Friends", "Incoming", "Sent"]
+    tab_width = 120
+    start_x = SCREEN_WIDTH // 2 - (len(tabs) * tab_width) // 2
     
-    # Draw input box background
+    for i, tab in enumerate(tabs):
+        x = start_x + i * tab_width
+        color = YELLOW if (i == 0 and friend_menu_tab == "friends") or \
+                         (i == 1 and friend_menu_tab == "requests") or \
+                         (i == 2 and friend_menu_tab == "sent") else WHITE
+        draw_text(f"{i+1}. {tab}", x, 70, color, 18)
+    
+    draw_text("Press 1/2/3 to switch tabs", SCREEN_WIDTH // 2, 95, GRAY, 14, center=True)
+    
+    if friend_menu_tab == "friends":
+        draw_friends_tab()
+    elif friend_menu_tab == "requests":
+        draw_requests_tab()
+    elif friend_menu_tab == "sent":
+        draw_sent_tab()
+    
+    # Show messages
+    if friend_message:
+        color = GREEN if any(word in friend_message.lower() for word in ["sent", "accepted", "success"]) else RED
+        draw_text(friend_message, SCREEN_WIDTH // 2, 400, color, 16, center=True)
+    
+    # Instructions
+    draw_text("Press ESC to go back", SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50, GRAY, 16, center=True)
+
+def draw_friends_tab():
+    """Draw the friends list tab"""
+    # Add friend section
+    draw_text("Add Friend:", 50, 120, WHITE, 20)
+    
+    # Draw input box
     input_box_color = YELLOW if input_mode == "friend_search" else WHITE
-    pygame.draw.rect(win, (50, 50, 50), (200, 95, 400, 30))  # Background box
-    pygame.draw.rect(win, input_box_color, (200, 95, 400, 30), 2)  # Border
+    pygame.draw.rect(win, (50, 50, 50), (200, 115, 400, 30))
+    pygame.draw.rect(win, input_box_color, (200, 115, 400, 30), 2)
     
-    # Display text with cursor
     search_display = friend_search_text + ("_" if input_mode == "friend_search" else "")
-    draw_text(search_display, 205, 100, input_box_color, 18)
-    draw_text("(Click here to type username, ENTER to send request)", 50, 130, GRAY, 14)   
+    draw_text(search_display, 205, 120, input_box_color, 18)
+    draw_text("(Click to type, ENTER to send)", 50, 150, GRAY, 14)
+    
     # Friends list
     friends = db_handler.get_friends("accepted") if db_handler else []
-    draw_text(f"Your Friends ({len(friends)}):", 50, 170, WHITE, 20)
+    draw_text(f"Your Friends ({len(friends)}):", 50, 180, WHITE, 20)
     
-    y_pos = 200
+    y_pos = 210
     if friends:
-        for i, friend in enumerate(friends[:8]):  # Show max 8 friends
+        for friend in friends[:6]:
             friend_name = friend.get('friend_profile', {}).get('username', 'Unknown')
             friend_score = friend.get('friend_profile', {}).get('total_score', 0)
             draw_text(f"• {friend_name} (Score: {friend_score})", 70, y_pos, WHITE, 16)
             y_pos += 25
     else:
-        draw_text("No friends yet. Add some friends to compete!", 70, y_pos, GRAY, 16)
+        draw_text("No friends yet. Add some!", 70, y_pos, GRAY, 16)
+
+def draw_requests_tab():
+    """Draw incoming friend requests tab"""
+    global selected_request
     
-    # Show messages
-    if friend_message:
-        color = GREEN if "sent" in friend_message.lower() else RED
-        draw_text(friend_message, SCREEN_WIDTH // 2, 400, color, 16, center=True)
+    pending_requests = db_handler.get_pending_friend_requests() if db_handler else []
+    draw_text(f"Incoming Friend Requests ({len(pending_requests)}):", 50, 120, WHITE, 20)
     
-    # Instructions
-    draw_text("Press ESC to go back", SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50, GRAY, 16, center=True)
+    if pending_requests:
+        draw_text("Use UP/DOWN arrows, ENTER to accept, DELETE to decline", 50, 145, GRAY, 14)
+        
+        y_pos = 170
+        for i, request in enumerate(pending_requests[:8]):
+            sender_name = request.get('sender_profile', {}).get('username', 'Unknown')
+            sender_score = request.get('sender_profile', {}).get('total_score', 0)
+            
+            # Highlight selected request
+            color = YELLOW if i == selected_request else WHITE
+            prefix = "→ " if i == selected_request else "  "
+            
+            draw_text(f"{prefix}{sender_name} (Score: {sender_score})", 70, y_pos, color, 16)
+            y_pos += 25
+        
+        if selected_request < len(pending_requests):
+            draw_text("ENTER = Accept | DELETE = Decline", SCREEN_WIDTH // 2, 350, GREEN, 16, center=True)
+    else:
+        draw_text("No pending requests", 70, 170, GRAY, 16)
+
+def draw_sent_tab():
+    """Draw sent friend requests tab"""
+    sent_requests = db_handler.get_sent_friend_requests() if db_handler else []
+    draw_text(f"Sent Friend Requests ({len(sent_requests)}):", 50, 120, WHITE, 20)
+    
+    y_pos = 150
+    if sent_requests:
+        for request in sent_requests[:8]:
+            recipient_name = request.get('recipient_profile', {}).get('username', 'Unknown')
+            draw_text(f"• {recipient_name} (Pending...)", 70, y_pos, GRAY, 16)
+            y_pos += 25
+    else:
+        draw_text("No pending sent requests", 70, y_pos, GRAY, 16)
 
 def draw_login():
     """Draw the login/signup screen"""
@@ -702,7 +768,7 @@ def handle_menu_input(event):
 
 def handle_friends_input(event):
     """Handle input for friends screen"""
-    global input_mode, friend_search_text, friend_message, game_state
+    global input_mode, friend_search_text, friend_message, game_state, friend_menu_tab, selected_request
     
     if event.type == pygame.KEYDOWN:
         if event.key == pygame.K_ESCAPE:
@@ -710,36 +776,67 @@ def handle_friends_input(event):
             input_mode = None
             friend_message = ""
         
-        elif event.key == pygame.K_RETURN and input_mode == "friend_search":
-            # Send friend request
-            if friend_search_text.strip() and db_handler and db_handler.is_authenticated():
-                result = db_handler.add_friend(friend_search_text.strip())
-                if result:
-                    friend_message = f"Friend request sent to {friend_search_text}!"
-                    friend_search_text = ""
+        # Tab switching
+        elif event.key == pygame.K_1:
+            friend_menu_tab = "friends"
+            selected_request = 0
+        elif event.key == pygame.K_2:
+            friend_menu_tab = "requests"
+            selected_request = 0
+        elif event.key == pygame.K_3:
+            friend_menu_tab = "sent"
+            selected_request = 0
+        
+        # Handle requests tab navigation
+        elif friend_menu_tab == "requests":
+            pending_requests = db_handler.get_pending_friend_requests() if db_handler else []
+            
+            if event.key == pygame.K_UP and pending_requests:
+                selected_request = (selected_request - 1) % len(pending_requests)
+            elif event.key == pygame.K_DOWN and pending_requests:
+                selected_request = (selected_request + 1) % len(pending_requests)
+            elif event.key == pygame.K_RETURN and pending_requests and selected_request < len(pending_requests):
+                # Accept friend request
+                request = pending_requests[selected_request]
+                if db_handler.respond_to_friend_request(request["id"], True):
+                    sender_name = request.get('sender_profile', {}).get('username', 'Unknown')
+                    friend_message = f"Accepted friend request from {sender_name}!"
                 else:
-                    friend_message = "Failed to send friend request. User may not exist."
-            else:
-                friend_message = "Please log in to add friends"
-            input_mode = None
+                    friend_message = "Failed to accept friend request"
+            elif event.key == pygame.K_DELETE and pending_requests and selected_request < len(pending_requests):
+                # Decline friend request
+                request = pending_requests[selected_request]
+                if db_handler.respond_to_friend_request(request["id"], False):
+                    sender_name = request.get('sender_profile', {}).get('username', 'Unknown')
+                    friend_message = f"Declined friend request from {sender_name}"
+                else:
+                    friend_message = "Failed to decline friend request"
         
-        elif input_mode == "friend_search" and event.unicode.isprintable():
-            # Add character to search
-            if len(friend_search_text) < 20:
-                friend_search_text += event.unicode
-        
-        elif event.key == pygame.K_BACKSPACE and input_mode == "friend_search":
-            # Remove character
-            friend_search_text = friend_search_text[:-1]
+        # Handle friend search (only in friends tab)
+        elif friend_menu_tab == "friends":
+            if event.key == pygame.K_RETURN and input_mode == "friend_search":
+                if friend_search_text.strip() and db_handler and db_handler.is_authenticated():
+                    result = db_handler.add_friend(friend_search_text.strip())
+                    if result:
+                        friend_message = f"Friend request sent to {friend_search_text}!"
+                        friend_search_text = ""
+                    else:
+                        friend_message = "Failed to send request. User may not exist."
+                else:
+                    friend_message = "Please log in to add friends"
+                input_mode = None
+            
+            elif input_mode == "friend_search" and event.unicode.isprintable():
+                if len(friend_search_text) < 20:
+                    friend_search_text += event.unicode
+            
+            elif event.key == pygame.K_BACKSPACE and input_mode == "friend_search":
+                friend_search_text = friend_search_text[:-1]
     
-    elif event.type == pygame.MOUSEBUTTONDOWN:
-        # Click to select friend search field
+    elif event.type == pygame.MOUSEBUTTONDOWN and friend_menu_tab == "friends":
         mouse_x, mouse_y = event.pos
-        
-        # Adjust these coordinates to match your text field position
-        if 100 <= mouse_y <= 125 and 200 <= mouse_x <= 600:  # Friend search field area
+        if 115 <= mouse_y <= 145 and 200 <= mouse_x <= 600:
             input_mode = "friend_search"
-            print("Friend search field activated")  # Debug message
         else:
             input_mode = None
 
