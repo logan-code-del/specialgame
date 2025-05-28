@@ -709,7 +709,7 @@ class GameSupabaseHandler:
                 print("You cannot add yourself as a friend")
                 return None
             
-            # Check if friendship already exists
+            # Check if friendship already exists (in either direction)
             existing = self.supabase.table("friendships").select("*").or_(
                 f"and(user_id.eq.{self.current_user.id},friend_id.eq.{friend_user_id}),"
                 f"and(user_id.eq.{friend_user_id},friend_id.eq.{self.current_user.id})"
@@ -752,16 +752,45 @@ class GameSupabaseHandler:
             return []
         
         try:
-            response = self.supabase.table("friendships").select(
-                "*, friend_profile:user_profiles!friendships_friend_id_fkey(username, total_score, games_played)"
+            # Get friendships and join with user profiles manually
+            friendships_response = self.supabase.table("friendships").select(
+                "id, friend_id, status, created_at"
             ).eq("user_id", self.current_user.id).eq("status", status).execute()
             
-            return response.data
+            if not friendships_response.data:
+                return []
+            
+            # Get friend profiles separately
+            friend_ids = [f["friend_id"] for f in friendships_response.data]
+            
+            if friend_ids:
+                profiles_response = self.supabase.table("user_profiles").select(
+                    "user_id, username, total_score, games_played"
+                ).in_("user_id", friend_ids).execute()
+                
+                # Combine the data
+                profiles_by_id = {p["user_id"]: p for p in profiles_response.data}
+                
+                friends = []
+                for friendship in friendships_response.data:
+                    friend_profile = profiles_by_id.get(friendship["friend_id"])
+                    if friend_profile:
+                        friends.append({
+                            "id": friendship["id"],
+                            "friend_id": friendship["friend_id"],
+                            "status": friendship["status"],
+                            "created_at": friendship["created_at"],
+                            "friend_profile": friend_profile
+                        })
+                
+                return friends
+            
+            return []
             
         except Exception as e:
             print(f"Error getting friends: {e}")
             return []
-    
+
     def get_friend_leaderboard(self) -> List[Dict]:
         """Get leaderboard of friends' best scores"""
         friends = self.get_friends("accepted")
@@ -775,7 +804,7 @@ class GameSupabaseHandler:
             # Get best scores for each friend
             response = self.supabase.table("player_progress").select(
                 "user_id, player_name, score, completion_time, maze_size, timestamp"
-            ).in_("user_id", friend_ids).order("score.desc").execute()
+            ).in_("user_id", friend_ids).order("score", desc=True).execute()
             
             # Group by user and get their best score
             user_best = {}
@@ -784,7 +813,7 @@ class GameSupabaseHandler:
                 if user_id not in user_best or record["score"] > user_best[user_id]["score"]:
                     user_best[user_id] = record
             
-            return list(user_best.values())
+            return sorted(user_best.values(), key=lambda x: x["score"], reverse=True)
             
         except Exception as e:
             print(f"Error getting friend leaderboard: {e}")
