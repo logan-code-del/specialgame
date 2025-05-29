@@ -6,6 +6,8 @@ from datetime import datetime
 import hashlib
 import time
 from dotenv import load_dotenv
+import threading
+import queue
 
 class GameSupabaseHandler:
     def __init__(self, url: str = None, key: str = None):
@@ -170,7 +172,27 @@ class GameSupabaseHandler:
                 "profile": profile
             }
         return None
-    
+    def get_session_data(self) -> dict:
+        """
+        Get current session data for passing to game application
+        
+        Returns:
+            Dictionary containing session information
+        """
+        if not self.is_authenticated():
+            return {}
+        
+        try:
+            return {
+                'access_token': self.current_session.access_token if hasattr(self.current_session, 'access_token') else None,
+                'refresh_token': self.current_session.refresh_token if hasattr(self.current_session, 'refresh_token') else None,
+                'user_id': self.current_user.id,
+                'email': self.current_user.email
+            }
+        except Exception as e:
+            print(f"Error getting session data: {e}")
+            return {}
+
     def _restore_session(self):
         """Try to restore existing session"""
         try:
@@ -241,6 +263,58 @@ class GameSupabaseHandler:
             print(f"Error cleaning up sessions: {e}")
             return False
 
+    def restore_session(self, access_token: str, refresh_token: str = None) -> bool:
+        """
+        Restore a session using access and refresh tokens
+        
+        Args:
+            access_token: The access token from a previous session
+            refresh_token: The refresh token from a previous session (optional)
+            
+        Returns:
+            True if session restored successfully, False otherwise
+        """
+        try:
+            if not access_token:
+                print("❌ No access token provided")
+                return False
+            
+            # Try to get user info directly with the access token
+            try:
+                # Set the Authorization header manually
+                self.supabase.auth._headers = {
+                    **self.supabase.auth._headers,
+                    "Authorization": f"Bearer {access_token}"
+                }
+                
+                # Get the current user
+                user_response = self.supabase.auth.get_user(access_token)
+                
+                if user_response and user_response.user:
+                    self.current_user = user_response.user
+                    
+                    # Create a minimal session object
+                    from types import SimpleNamespace
+                    self.current_session = SimpleNamespace()
+                    self.current_session.access_token = access_token
+                    self.current_session.refresh_token = refresh_token
+                    self.current_session.user = user_response.user
+                    
+                    print(f"✅ Session restored for: {user_response.user.email}")
+                    return True
+                else:
+                    print("❌ Failed to get user with provided token")
+                    return False
+                    
+            except Exception as token_error:
+                print(f"❌ Token validation failed: {token_error}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Error restoring session: {e}")
+            return False
+
+
     def start_game_session(self, maze_width: int = None, maze_height: int = None, difficulty: str = "medium") -> Optional[str]:
         """
         Start a new game session
@@ -256,21 +330,38 @@ class GameSupabaseHandler:
         try:
             self.game_start_time = time.time()
             
-            # First, check if there's an existing session for this user and clean it up
+            # First, clean up any existing sessions for this user
             if self.is_authenticated():
                 try:
-                    # Delete any existing sessions for this user
                     existing_sessions = self.supabase.table("game_sessions").delete().eq("user_id", self.current_user.id).execute()
                     if existing_sessions.data:
                         print(f"🧹 Cleaned up {len(existing_sessions.data)} existing session(s)")
                 except Exception as cleanup_error:
                     print(f"Note: Could not clean up existing sessions: {cleanup_error}")
             
+            # Prepare session data
             session_data = {
-                "player_name": self.get_current_user()['username'] if self.is_authenticated() else "Anonymous",
-                "user_id": self.current_user.id if self.is_authenticated() else None,
                 "session_start": datetime.now().isoformat()
             }
+            
+            # Add user-specific data if authenticated
+            if self.is_authenticated():
+                # Use the actual user ID from the auth system
+                session_data.update({
+                    "player_name": self.get_current_user()['username'],
+                    "user_id": self.current_user.id  # This should match auth.uid()
+                })
+            else:
+                session_data.update({
+                    "player_name": "Guest",
+                    "user_id": None  # Explicitly set to NULL for guest sessions
+                })
+            
+            # Add optional maze data if provided
+            if maze_width and maze_height:
+                session_data["maze_size"] = f"{maze_width}x{maze_height}"
+            if difficulty:
+                session_data["difficulty"] = difficulty
             
             response = self.supabase.table("game_sessions").insert(session_data).execute()
             
@@ -278,30 +369,25 @@ class GameSupabaseHandler:
                 self.game_session_id = response.data[0]['id']
                 print(f"✅ Started game session: {self.game_session_id}")
                 return self.game_session_id
+            else:
+                print("❌ No data returned from session creation")
+                return None
             
         except Exception as e:
-            print(f"Error starting game session: {e}")
+            print(f"❌ Error starting game session: {e}")
             
-            # If we still get a duplicate key error, try to update the existing session instead
-            if "duplicate key" in str(e) and self.is_authenticated():
-                try:
-                    print("🔄 Attempting to update existing session...")
-                    update_data = {
-                        "session_start": datetime.now().isoformat(),
-                        "session_end": None  # Reset end time only (remove final_score reference)
-                    }
-                    
-                    response = self.supabase.table("game_sessions").update(update_data).eq("user_id", self.current_user.id).execute()
-                    
-                    if response.data:
-                        self.game_session_id = response.data[0]['id']
-                        print(f"✅ Updated existing game session: {self.game_session_id}")
-                        return self.game_session_id
-                        
-                except Exception as update_error:
-                    print(f"Failed to update existing session: {update_error}")
-        
-        return None
+            # Check if it's an RLS error and provide helpful message
+            if 'row-level security policy' in str(e).lower():
+                print("💡 This appears to be a Row Level Security (RLS) policy issue.")
+                print("   Please add RLS policies for the game_sessions table in your Supabase dashboard.")
+                print("   Or temporarily disable RLS for testing: ALTER TABLE game_sessions DISABLE ROW LEVEL SECURITY;")
+            
+            # If session creation fails, continue without session tracking
+            print("⚠️ Continuing without session tracking")
+            self.game_session_id = None
+            return None
+
+
     
     def end_game_session(self, final_score: int = 0, completed: bool = False) -> Optional[Dict]:
         """
@@ -790,9 +876,9 @@ class GameSupabaseHandler:
         try:
             new_status = "accepted" if accept else "declined"
             
+            # Remove the updated_at field since it doesn't exist in the table
             response = self.supabase.table("friendships").update({
-                "status": new_status,
-                "updated_at": datetime.now().isoformat()
+                "status": new_status
             }).eq("id", request_id).eq("friend_id", self.current_user.id).execute()
             
             if response.data:
@@ -805,6 +891,7 @@ class GameSupabaseHandler:
         except Exception as e:
             print(f"Error responding to friend request: {e}")
             return False
+
 
     def get_sent_friend_requests(self) -> List[Dict]:
         """Get friend requests sent BY the current user"""
@@ -863,36 +950,52 @@ class GameSupabaseHandler:
             return []
         
         try:
-            # Get friendships and join with user profiles manually
+            # Get friendships where current user is either user_id OR friend_id
+            # This handles both directions of the friendship
             friendships_response = self.supabase.table("friendships").select(
-                "id, friend_id, status, created_at"
-            ).eq("user_id", self.current_user.id).eq("status", status).execute()
+                "id, user_id, friend_id, status, created_at"
+            ).or_(
+                f"and(user_id.eq.{self.current_user.id},status.eq.{status}),"
+                f"and(friend_id.eq.{self.current_user.id},status.eq.{status})"
+            ).execute()
             
             if not friendships_response.data:
                 return []
             
-            # Get friend profiles separately
-            friend_ids = [f["friend_id"] for f in friendships_response.data]
+            # Determine which user IDs are the friends (not the current user)
+            friend_ids = []
+            friendship_data = {}
+            
+            for friendship in friendships_response.data:
+                if friendship["user_id"] == self.current_user.id:
+                    # Current user sent the request, friend is friend_id
+                    friend_id = friendship["friend_id"]
+                else:
+                    # Current user received the request, friend is user_id
+                    friend_id = friendship["user_id"]
+                
+                friend_ids.append(friend_id)
+                friendship_data[friend_id] = friendship
             
             if friend_ids:
+                # Get friend profiles
                 profiles_response = self.supabase.table("user_profiles").select(
                     "user_id, username, total_score, games_played"
                 ).in_("user_id", friend_ids).execute()
                 
                 # Combine the data
-                profiles_by_id = {p["user_id"]: p for p in profiles_response.data}
-                
                 friends = []
-                for friendship in friendships_response.data:
-                    friend_profile = profiles_by_id.get(friendship["friend_id"])
-                    if friend_profile:
-                        friends.append({
-                            "id": friendship["id"],
-                            "friend_id": friendship["friend_id"],
-                            "status": friendship["status"],
-                            "created_at": friendship["created_at"],
-                            "friend_profile": friend_profile
-                        })
+                for profile in profiles_response.data:
+                    friend_id = profile["user_id"]
+                    friendship = friendship_data[friend_id]
+                    
+                    friends.append({
+                        "id": friendship["id"],
+                        "friend_id": friend_id,
+                        "status": friendship["status"],
+                        "created_at": friendship["created_at"],
+                        "friend_profile": profile
+                    })
                 
                 return friends
             
@@ -1169,6 +1272,212 @@ class GameSupabaseHandler:
             print(f"Error deleting game backup: {e}")
             return False
     
+    # ==================== CHAT FUNCTIONS ====================
+
+    def send_friend_message(self, friend_id: str, message: str) -> Optional[Dict]:
+        """Send a private message to a friend"""
+        if not self.is_authenticated():
+            return None
+        
+        try:
+            current_user = self.get_current_user()
+            if not current_user:
+                return None
+            
+            message_data = {
+                "sender_id": self.current_user.id,
+                "sender_name": current_user['username'],
+                "recipient_id": friend_id,
+                "message": message,
+                "chat_type": "friend",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            response = self.supabase.table("chat_messages").insert(message_data).execute()
+            
+            if response.data:
+                print(f"✅ Message sent to friend")
+                return response.data[0]
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error sending friend message: {e}")
+            return None
+
+    def send_game_message(self, message: str, game_session_id: str = None) -> Optional[Dict]:
+        """Send a message to game chat"""
+        if not self.is_authenticated():
+            return None
+        
+        try:
+            current_user = self.get_current_user()
+            if not current_user:
+                return None
+            
+            # Use current game session if not specified
+            session_id = game_session_id or self.game_session_id
+            
+            message_data = {
+                "sender_id": self.current_user.id,
+                "sender_name": current_user['username'],
+                "recipient_id": None,  # NULL for game chat
+                "message": message,
+                "chat_type": "game",
+                "game_session_id": session_id,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            response = self.supabase.table("chat_messages").insert(message_data).execute()
+            
+            if response.data:
+                print(f"✅ Game message sent")
+                return response.data[0]
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error sending game message: {e}")
+            return None
+
+    def send_global_message(self, message: str) -> Optional[Dict]:
+        """Send a message to global chat"""
+        if not self.is_authenticated():
+            return None
+        
+        try:
+            current_user = self.get_current_user()
+            if not current_user:
+                return None
+            
+            message_data = {
+                "sender_id": self.current_user.id,
+                "sender_name": current_user['username'],
+                "recipient_id": None,
+                "message": message,
+                "chat_type": "global",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            response = self.supabase.table("chat_messages").insert(message_data).execute()
+            
+            if response.data:
+                print(f"✅ Global message sent")
+                return response.data[0]
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error sending global message: {e}")
+            return None
+
+    def get_friend_messages(self, friend_id: str, limit: int = 50) -> List[Dict]:
+        """Get conversation with a specific friend"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            # Get messages between current user and friend (both directions)
+            response = self.supabase.table("chat_messages").select("*").or_(
+                f"and(sender_id.eq.{self.current_user.id},recipient_id.eq.{friend_id}),"
+                f"and(sender_id.eq.{friend_id},recipient_id.eq.{self.current_user.id})"
+            ).eq("chat_type", "friend").order("timestamp", desc=False).limit(limit).execute()
+            
+            return response.data
+            
+        except Exception as e:
+            print(f"Error getting friend messages: {e}")
+            return []
+
+    def get_game_messages(self, game_session_id: str = None, limit: int = 50) -> List[Dict]:
+        """Get messages from game chat"""
+        try:
+            session_id = game_session_id or self.game_session_id
+            
+            if not session_id:
+                # Get recent global game messages if no session
+                response = self.supabase.table("chat_messages").select("*").eq("chat_type", "game").is_("game_session_id", "null").order("timestamp", desc=False).limit(limit).execute()
+            else:
+                response = self.supabase.table("chat_messages").select("*").eq("chat_type", "game").eq("game_session_id", session_id).order("timestamp", desc=False).limit(limit).execute()
+            
+            return response.data
+            
+        except Exception as e:
+            print(f"Error getting game messages: {e}")
+            return []
+
+    def get_global_messages(self, limit: int = 50) -> List[Dict]:
+        """Get global chat messages"""
+        try:
+            response = self.supabase.table("chat_messages").select("*").eq("chat_type", "global").order("timestamp", desc=False).limit(limit).execute()
+            return response.data
+            
+        except Exception as e:
+            print(f"Error getting global messages: {e}")
+            return []
+
+    def get_recent_conversations(self, limit: int = 10) -> List[Dict]:
+        """Get recent friend conversations"""
+        if not self.is_authenticated():
+            return []
+        
+        try:
+            # Get recent messages where current user is sender or recipient
+            response = self.supabase.table("chat_messages").select("*").or_(
+                f"sender_id.eq.{self.current_user.id},"
+                f"recipient_id.eq.{self.current_user.id}"
+            ).eq("chat_type", "friend").order("timestamp", desc=True).limit(limit * 2).execute()
+            
+            # Group by conversation partner
+            conversations = {}
+            for message in response.data:
+                partner_id = message['recipient_id'] if message['sender_id'] == self.current_user.id else message['sender_id']
+                partner_name = message['sender_name'] if message['sender_id'] != self.current_user.id else "You"
+                
+                if partner_id not in conversations:
+                    conversations[partner_id] = {
+                        'partner_id': partner_id,
+                        'partner_name': partner_name,
+                        'last_message': message['message'],
+                        'last_timestamp': message['timestamp'],
+                        'unread_count': 0
+                    }
+            
+            return list(conversations.values())[:limit]
+            
+        except Exception as e:
+            print(f"Error getting recent conversations: {e}")
+            return []
+
+    def mark_messages_as_read(self, sender_id: str) -> bool:
+        """Mark messages from a specific sender as read"""
+        if not self.is_authenticated():
+            return False
+        
+        try:
+            response = self.supabase.table("chat_messages").update({
+                "is_read": True
+            }).eq("sender_id", sender_id).eq("recipient_id", self.current_user.id).eq("is_read", False).execute()
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error marking messages as read: {e}")
+            return False
+
+    def get_unread_message_count(self) -> int:
+        """Get count of unread messages"""
+        if not self.is_authenticated():
+            return 0
+        
+        try:
+            response = self.supabase.table("chat_messages").select("id", count="exact").eq("recipient_id", self.current_user.id).eq("is_read", False).execute()
+            return response.count or 0
+            
+        except Exception as e:
+            print(f"Error getting unread count: {e}")
+            return 0
+
     # ==================== UTILITY AND ADMIN FUNCTIONS ====================
     
     def get_global_stats(self) -> Dict[str, Any]:
@@ -1425,4 +1734,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Error: {e}")
         print("Make sure to set SUPABASE_URL and SUPABASE_KEY environment variables")
-
